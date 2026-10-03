@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useRef, useState, type ReactNode, type TouchEvent } from "react";
+import { useEffect, useRef, useState, type ReactNode, type PointerEvent } from "react";
 import SashimiPage from "./SashimiPage";
 import DonburiPage from "./DonburiPage";
 import SushiPage from "./SushiPage";
@@ -39,6 +39,10 @@ const TURN_DURATION = 1200;
 export default function MenuBook() {
   const [isOpen, setIsOpen] = useState(false);
 
+  // แยก state การ "กางปก" ออกจาก isOpen เพื่อบังคับให้ browser
+  // เห็น frame เริ่มต้นก่อน แล้วจึง animate rotateY อย่างแน่นอน
+  const [coverFlipped, setCoverFlipped] = useState(false);
+
   // ใช้ index แทนการล็อก type เป็น 2 | 3 | 4 ...
   const [pageIndex, setPageIndex] = useState(0);
 
@@ -49,7 +53,9 @@ export default function MenuBook() {
   // ตอนเปิด Add-on หนังสือจะเข้าสู่โหมด "กางเพื่อฉาย Hologram"
   const [hologramMode, setHologramMode] = useState(false);
 
-  const touchStartX = useRef(0);
+  const pointerStartX = useRef(0);
+  const pointerStartY = useRef(0);
+  const pointerTracking = useRef(false);
 
   useEffect(() => {
     const handleHologramOpen = () => setHologramMode(true);
@@ -75,10 +81,22 @@ export default function MenuBook() {
     MENU_PAGES[Math.max(pageIndex - 1, 0)];
 
   function openBook() {
-    if (turning) return;
+    if (turning || isOpen) return;
 
     setPageIndex(0);
+    setSheetFlipped(false);
+    setDirection("next");
+
+    // เริ่มจากปกยังไม่พลิกก่อน
+    setCoverFlipped(false);
     setIsOpen(true);
+
+    // 2 frames เพื่อให้ CSS transition เริ่มจาก rotateY(0deg) จริง
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setCoverFlipped(true);
+      });
+    });
   }
 
   function nextPage() {
@@ -110,9 +128,17 @@ export default function MenuBook() {
   function previousPage() {
     if (!isOpen || turning) return;
 
-    // อยู่หน้าแรกของเมนู -> ปิดปก
+    // อยู่หน้าแรกของเมนู -> ปิดปกด้วย animation
     if (pageIndex === 0) {
-      setIsOpen(false);
+      setHologramMode(false);
+      window.dispatchEvent(new Event("menu:hologram-close"));
+
+      setCoverFlipped(false);
+
+      window.setTimeout(() => {
+        setIsOpen(false);
+      }, 1050);
+
       return;
     }
 
@@ -139,21 +165,59 @@ export default function MenuBook() {
     }, TURN_DURATION);
   }
 
-  function handleTouchStart(e: TouchEvent<HTMLDivElement>) {
-    touchStartX.current = e.touches[0].clientX;
+  function handlePointerDown(e: PointerEvent<HTMLDivElement>) {
+    // สำคัญ:
+    // ตอนหนังสือยังปิด ห้าม root จับ pointer capture
+    // ไม่งั้น click/tap ของปกหน้าจะถูกแย่งไป ทำให้กดแล้วไม่เปิด
+    if (!isOpen) {
+      pointerTracking.current = false;
+      return;
+    }
+
+    // ตอน Hologram เปิดอยู่ หรือกำลังพลิกหน้า ไม่ให้ swipe
+    if (hologramMode || turning) {
+      pointerTracking.current = false;
+      return;
+    }
+
+    pointerTracking.current = true;
+    pointerStartX.current = e.clientX;
+    pointerStartY.current = e.clientY;
+
+    // หลังเปิดหนังสือแล้วค่อยใช้ pointer capture สำหรับ swipe
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Safari/บาง browser อาจไม่ต้องใช้ capture
+    }
   }
 
-  function handleTouchEnd(e: TouchEvent<HTMLDivElement>) {
-    const touchEndX = e.changedTouches[0].clientX;
-    const distance = touchStartX.current - touchEndX;
+  function handlePointerUp(e: PointerEvent<HTMLDivElement>) {
+    if (!pointerTracking.current) return;
 
-    if (Math.abs(distance) < 50) return;
+    pointerTracking.current = false;
 
-    if (distance > 0) {
+    if (hologramMode || turning) return;
+
+    const dx = e.clientX - pointerStartX.current;
+    const dy = e.clientY - pointerStartY.current;
+
+    // ต้องลากแนวนอนพอสมควร และต้องเป็นแนวนอนมากกว่าแนวตั้ง
+    if (Math.abs(dx) < 42) return;
+    if (Math.abs(dx) <= Math.abs(dy) * 1.15) return;
+
+    // ลากไปซ้าย -> หน้าถัดไป
+    if (dx < 0) {
       nextPage();
-    } else {
-      previousPage();
+      return;
     }
+
+    // ลากไปขวา -> หน้าก่อนหน้า / ปิดปก
+    previousPage();
+  }
+
+  function handlePointerCancel() {
+    pointerTracking.current = false;
   }
 
   return (
@@ -162,6 +226,7 @@ export default function MenuBook() {
         relative
         flex
         min-h-[100dvh]
+        select-none
         w-full
         items-center
         justify-start
@@ -174,8 +239,10 @@ export default function MenuBook() {
         md:justify-center
         md:pt-0
       "
-      onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
+      style={{ touchAction: "pan-y" }}
     >
       {/* Background glow */}
       <div
@@ -461,21 +528,29 @@ export default function MenuBook() {
         {/* FRONT COVER */}
         <button
           type="button"
-          onClick={openBook}
+          onPointerDown={(e) => {
+            // ไม่ให้ pointerdown ของปกไหลไปถึง root swipe handler
+            e.stopPropagation();
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            openBook();
+          }}
           className="
             absolute
             inset-0
             z-50
             cursor-pointer
             [transform-style:preserve-3d]
+            will-change-transform
             transition-transform
-            duration-[1200ms]
-            ease-[cubic-bezier(0.645,0.045,0.355,1)]
+            duration-[1250ms]
+            ease-[cubic-bezier(0.22,0.75,0.18,1)]
             focus:outline-none
           "
           style={{
             transformOrigin: "left center",
-            transform: isOpen
+            transform: coverFlipped
               ? hologramMode
                 ? "rotateY(-180deg)"
                 : "rotateY(-178deg)"
@@ -810,16 +885,13 @@ function BestSellerPage() {
           src="/kawdong.jpg"
         />
 
-        <FoodCircle text="รูปที่ 2" 
-        src="/sushisalmon.jpg"
-        />
+        <FoodCircle text="รูปที่ 2" />
       </div>
 
       {/* รูปกลาง */}
       <div className="-mt-1 flex justify-center">
         <FoodCircle
           text="รูปที่ 3"
-          src="/donburi/dongsalmons.jpg"
           large
         />
       </div>
