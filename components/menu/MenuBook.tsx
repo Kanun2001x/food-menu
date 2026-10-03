@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useRef, useState, type ReactNode, type PointerEvent } from "react";
+import { useEffect, useRef, useState, type ReactNode, type PointerEvent, type TouchEvent } from "react";
 import SashimiPage from "./SashimiPage";
 import DonburiPage from "./DonburiPage";
 import SushiPage from "./SushiPage";
@@ -57,6 +57,10 @@ export default function MenuBook() {
   const pointerStartY = useRef(0);
   const pointerTracking = useRef(false);
 
+  // Safari/iPhone ใช้ touch event เป็น fallback โดยตรง
+  const touchStartX = useRef(0);
+  const touchStartY = useRef(0);
+
   useEffect(() => {
     const handleHologramOpen = () => setHologramMode(true);
     const handleHologramClose = () => setHologramMode(false);
@@ -108,13 +112,10 @@ export default function MenuBook() {
 
     setDirection("next");
     setTurning(true);
-    setSheetFlipped(false);
+    setSheetFlipped(true);
 
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        setSheetFlipped(true);
-      });
-    });
+    // ใช้ CSS keyframe โดยตรงแทน transition trigger
+    // Safari/WebKit จะเสถียรกว่าการ mount แล้วเปลี่ยน transform ใน rAF
 
     window.setTimeout(() => {
       setPageIndex((prev) =>
@@ -148,15 +149,9 @@ export default function MenuBook() {
 
     setDirection("prev");
     setTurning(true);
+    setSheetFlipped(false);
 
-    // เริ่มจากกระดาษอยู่ฝั่งซ้ายแล้วเปิดกลับมาขวา
-    setSheetFlipped(true);
-
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        setSheetFlipped(false);
-      });
-    });
+    // ใช้ CSS keyframe ย้อนกลับโดยตรงสำหรับ Safari/WebKit
 
     window.setTimeout(() => {
       setPageIndex((prev) => Math.max(prev - 1, 0));
@@ -166,6 +161,9 @@ export default function MenuBook() {
   }
 
   function handlePointerDown(e: PointerEvent<HTMLDivElement>) {
+    // มือถือ/iPhone ให้ touch handlers ด้านล่างเป็นคนจัดการ
+    if (e.pointerType === "touch") return;
+
     // สำคัญ:
     // ตอนหนังสือยังปิด ห้าม root จับ pointer capture
     // ไม่งั้น click/tap ของปกหน้าจะถูกแย่งไป ทำให้กดแล้วไม่เปิด
@@ -193,6 +191,7 @@ export default function MenuBook() {
   }
 
   function handlePointerUp(e: PointerEvent<HTMLDivElement>) {
+    if (e.pointerType === "touch") return;
     if (!pointerTracking.current) return;
 
     pointerTracking.current = false;
@@ -220,6 +219,39 @@ export default function MenuBook() {
     pointerTracking.current = false;
   }
 
+  // =========================================================
+  // SAFARI / IPHONE SWIPE FALLBACK
+  // =========================================================
+  function handleTouchStart(e: TouchEvent<HTMLDivElement>) {
+    if (!isOpen || hologramMode || turning) return;
+
+    const touch = e.touches[0];
+    if (!touch) return;
+
+    touchStartX.current = touch.clientX;
+    touchStartY.current = touch.clientY;
+  }
+
+  function handleTouchEnd(e: TouchEvent<HTMLDivElement>) {
+    if (!isOpen || hologramMode || turning) return;
+
+    const touch = e.changedTouches[0];
+    if (!touch) return;
+
+    const dx = touch.clientX - touchStartX.current;
+    const dy = touch.clientY - touchStartY.current;
+
+    // swipe แนวนอนอย่างน้อย 36px
+    if (Math.abs(dx) < 36) return;
+    if (Math.abs(dx) <= Math.abs(dy) * 1.05) return;
+
+    if (dx < 0) {
+      nextPage();
+    } else {
+      previousPage();
+    }
+  }
+
   return (
     <div
       className="
@@ -242,7 +274,12 @@ export default function MenuBook() {
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerCancel}
-      style={{ touchAction: "pan-y" }}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      style={{
+        touchAction: "pan-y",
+        WebkitUserSelect: "none",
+      }}
     >
       {/* Background glow */}
       <div
@@ -311,6 +348,12 @@ export default function MenuBook() {
 
 
         `}
+        style={{
+          perspective: "1500px",
+          WebkitPerspective: "1500px",
+          perspectiveOrigin: "50% 50%",
+          WebkitPerspectiveOrigin: "50% 50%",
+        }}
       >
         <div
           className="
@@ -326,7 +369,12 @@ export default function MenuBook() {
           "
           style={{
             transformOrigin: "50% 82%",
+            transformStyle: "preserve-3d",
+            WebkitTransformStyle: "preserve-3d",
             transform: hologramMode
+              ? "rotateX(52deg) scale(0.94) translateY(38px)"
+              : "rotateX(0deg) scale(1) translateY(0px)",
+            WebkitTransform: hologramMode
               ? "rotateX(52deg) scale(0.94) translateY(38px)"
               : "rotateX(0deg) scale(1) translateY(0px)",
           }}
@@ -408,15 +456,22 @@ export default function MenuBook() {
                 inset-0
                 z-40
                 [transform-style:preserve-3d]
-                transition-transform
-                duration-[1200ms]
-                ease-[cubic-bezier(0.645,0.045,0.355,1)]
+                will-change-transform
               "
               style={{
                 transformOrigin: "left center",
-                transform: sheetFlipped
-                  ? "rotateY(-178deg)"
-                  : "rotateY(0deg)",
+                transformStyle: "preserve-3d",
+                WebkitTransformStyle: "preserve-3d",
+                backfaceVisibility: "visible",
+                WebkitBackfaceVisibility: "visible",
+                animation:
+                  direction === "next"
+                    ? `safari-page-next ${TURN_DURATION}ms cubic-bezier(0.645,0.045,0.355,1) forwards`
+                    : `safari-page-prev ${TURN_DURATION}ms cubic-bezier(0.645,0.045,0.355,1) forwards`,
+                WebkitAnimation:
+                  direction === "next"
+                    ? `safari-page-next ${TURN_DURATION}ms cubic-bezier(0.645,0.045,0.355,1) forwards`
+                    : `safari-page-prev ${TURN_DURATION}ms cubic-bezier(0.645,0.045,0.355,1) forwards`,
               }}
             >
               {/* FRONT OF PAPER */}
@@ -433,6 +488,12 @@ export default function MenuBook() {
                   shadow-[12px_20px_45px_rgba(0,0,0,0.40)]
                   [backface-visibility:hidden]
                 "
+                style={{
+                  backfaceVisibility: "hidden",
+                  WebkitBackfaceVisibility: "hidden",
+                  transform: "translateZ(0.1px)",
+                  WebkitTransform: "translateZ(0.1px)",
+                }}
               >
                 <PaperBackground />
 
@@ -466,8 +527,13 @@ export default function MenuBook() {
                   bg-[#121316]
                   shadow-[12px_20px_45px_rgba(0,0,0,0.40)]
                   [backface-visibility:hidden]
-                  [transform:rotateY(180deg)]
                 "
+                style={{
+                  backfaceVisibility: "hidden",
+                  WebkitBackfaceVisibility: "hidden",
+                  transform: "rotateY(180deg) translateZ(0.1px)",
+                  WebkitTransform: "rotateY(180deg) translateZ(0.1px)",
+                }}
               >
                 <div
                   className="
@@ -550,11 +616,19 @@ export default function MenuBook() {
           "
           style={{
             transformOrigin: "left center",
+            transformStyle: "preserve-3d",
+            WebkitTransformStyle: "preserve-3d",
             transform: coverFlipped
               ? hologramMode
                 ? "rotateY(-180deg)"
                 : "rotateY(-178deg)"
               : "rotateY(0deg)",
+            WebkitTransform: coverFlipped
+              ? hologramMode
+                ? "rotateY(-180deg)"
+                : "rotateY(-178deg)"
+              : "rotateY(0deg)",
+            WebkitBackfaceVisibility: "visible",
             pointerEvents: isOpen ? "none" : "auto",
           }}
         >
@@ -572,6 +646,12 @@ export default function MenuBook() {
               shadow-[0_35px_90px_rgba(0,0,0,0.55)]
               [backface-visibility:hidden]
             "
+            style={{
+              backfaceVisibility: "hidden",
+              WebkitBackfaceVisibility: "hidden",
+              transform: "translateZ(0.1px)",
+              WebkitTransform: "translateZ(0.1px)",
+            }}
           >
             <div
               className="
@@ -669,8 +749,13 @@ export default function MenuBook() {
               bg-[#0b0b0b]
               shadow-[0_35px_80px_rgba(0,0,0,0.75)]
               [backface-visibility:hidden]
-              [transform:rotateY(180deg)]
             "
+            style={{
+              backfaceVisibility: "hidden",
+              WebkitBackfaceVisibility: "hidden",
+              transform: "rotateY(180deg) translateZ(0.1px)",
+              WebkitTransform: "rotateY(180deg) translateZ(0.1px)",
+            }}
           >
             <div
               className="
@@ -757,6 +842,61 @@ export default function MenuBook() {
         )}
         </div>
       </div>
+
+      <style>{`
+        /*
+          Safari/WebKit workaround:
+          ใช้ keyframe ตั้งแต่ต้นจนจบแทน transition state
+          เพื่อป้องกัน Safari ข้ามเฟรมของ rotateY
+        */
+        @keyframes safari-page-next {
+          0% {
+            transform: rotateY(0deg) translateZ(0px);
+          }
+          45% {
+            transform: rotateY(-88deg) translateZ(2px);
+          }
+          100% {
+            transform: rotateY(-178deg) translateZ(0px);
+          }
+        }
+
+        @keyframes safari-page-prev {
+          0% {
+            transform: rotateY(-178deg) translateZ(0px);
+          }
+          55% {
+            transform: rotateY(-88deg) translateZ(2px);
+          }
+          100% {
+            transform: rotateY(0deg) translateZ(0px);
+          }
+        }
+
+        @-webkit-keyframes safari-page-next {
+          0% {
+            -webkit-transform: rotateY(0deg) translateZ(0px);
+          }
+          45% {
+            -webkit-transform: rotateY(-88deg) translateZ(2px);
+          }
+          100% {
+            -webkit-transform: rotateY(-178deg) translateZ(0px);
+          }
+        }
+
+        @-webkit-keyframes safari-page-prev {
+          0% {
+            -webkit-transform: rotateY(-178deg) translateZ(0px);
+          }
+          55% {
+            -webkit-transform: rotateY(-88deg) translateZ(2px);
+          }
+          100% {
+            -webkit-transform: rotateY(0deg) translateZ(0px);
+          }
+        }
+      `}</style>
 
       {/* BOTTOM NAVIGATION */}
       {!isOpen && (
@@ -885,9 +1025,9 @@ function BestSellerPage() {
           src="/kawdong.jpg"
         />
 
-        <FoodCircle text="รูปที่ 2"
+        <FoodCircle text="รูปที่ 2" 
         src="/sushisalmon.jpg"
-         />
+        />
       </div>
 
       {/* รูปกลาง */}
@@ -1109,4 +1249,3 @@ function PaperBackground() {
     </>
   );
 }
-
