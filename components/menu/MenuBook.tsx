@@ -53,6 +53,10 @@ export default function MenuBook() {
   // ตอนเปิด Add-on หนังสือจะเข้าสู่โหมด "กางเพื่อฉาย Hologram"
   const [hologramMode, setHologramMode] = useState(false);
 
+  // Safari/WebKit บางเวอร์ชัน flatten 3D page-turn จนดูเหมือน "หาย"
+  // จึงใช้ animation 2D fallback เฉพาะ Safari แต่ browser อื่นยังใช้ 3D เดิม
+  const [safariPageTurn, setSafariPageTurn] = useState(false);
+
   const pointerStartX = useRef(0);
   const pointerStartY = useRef(0);
   const pointerTracking = useRef(false);
@@ -62,6 +66,13 @@ export default function MenuBook() {
   const touchStartY = useRef(0);
 
   useEffect(() => {
+    const ua = navigator.userAgent;
+    const isSafari =
+      /Safari/i.test(ua) &&
+      !/(Chrome|Chromium|CriOS|FxiOS|EdgiOS|OPiOS|Android)/i.test(ua);
+
+    setSafariPageTurn(isSafari);
+
     const handleHologramOpen = () => setHologramMode(true);
     const handleHologramClose = () => setHologramMode(false);
 
@@ -449,7 +460,79 @@ export default function MenuBook() {
           </div>
 
           {/* TURNING SHEET */}
-          {turning && (
+          {turning && safariPageTurn && (
+            <div
+              className="
+                absolute
+                inset-0
+                z-40
+
+                overflow-hidden
+
+                rounded-l-[4px]
+                rounded-r-[30px]
+
+                border
+                border-black/10
+
+                bg-[#090a0c]
+
+                shadow-[12px_20px_45px_rgba(0,0,0,0.42)]
+
+                will-change-transform
+              "
+              style={{
+                transformOrigin: "left center",
+                WebkitTransformOrigin: "left center",
+                animation:
+                  direction === "next"
+                    ? `safari-flat-next ${TURN_DURATION}ms cubic-bezier(0.55,0.02,0.18,1) forwards`
+                    : `safari-flat-prev ${TURN_DURATION}ms cubic-bezier(0.55,0.02,0.18,1) forwards`,
+                WebkitAnimation:
+                  direction === "next"
+                    ? `safari-flat-next ${TURN_DURATION}ms cubic-bezier(0.55,0.02,0.18,1) forwards`
+                    : `safari-flat-prev ${TURN_DURATION}ms cubic-bezier(0.55,0.02,0.18,1) forwards`,
+              }}
+            >
+              <PaperBackground />
+
+              {direction === "next"
+                ? currentPage.content
+                : previousPageDef.content}
+
+              {/* เงาขอบกระดาษตอนกวาดผ่าน */}
+              <div
+                className="
+                  pointer-events-none
+                  absolute
+                  inset-y-0
+                  right-0
+                  w-[28%]
+
+                  bg-gradient-to-l
+                  from-black/45
+                  via-black/10
+                  to-transparent
+                "
+              />
+
+              <div
+                className="
+                  pointer-events-none
+                  absolute
+                  inset-y-0
+                  right-0
+                  w-[5px]
+
+                  bg-white/10
+
+                  blur-[1px]
+                "
+              />
+            </div>
+          )}
+
+          {turning && !safariPageTurn && (
             <div
               className="
                 absolute
@@ -591,6 +674,90 @@ export default function MenuBook() {
             )}
         </div>
 
+        {/* SAFARI STATIC INSIDE COVER
+            2D fallback ไม่มี back-face แบบ rotateY
+            จึงวาดปกด้านในไว้ฝั่งซ้ายเมื่อเปิดหนังสือ
+        */}
+        {safariPageTurn && isOpen && (
+          <div
+            className={`
+              pointer-events-none
+              absolute
+              right-full
+              top-0
+              z-[18]
+
+              h-full
+              w-full
+
+              overflow-hidden
+
+              rounded-l-[30px]
+              rounded-r-[4px]
+
+              border
+              border-white/[0.08]
+
+              bg-[#0b0b0b]
+
+              shadow-[-18px_30px_80px_rgba(0,0,0,0.58)]
+
+              transition-[opacity,transform]
+              duration-[700ms]
+              ease-out
+
+              ${
+                coverFlipped
+                  ? "opacity-100 translate-x-0"
+                  : "opacity-0 translate-x-[16px]"
+              }
+            `}
+          >
+            <div
+              className="
+                absolute
+                inset-0
+                bg-[radial-gradient(circle_at_70%_30%,rgba(255,255,255,0.045),transparent_45%)]
+              "
+            />
+
+            <div
+              className="
+                absolute
+                inset-[24px]
+
+                rounded-[20px]
+
+                border
+                border-white/[0.055]
+              "
+            />
+
+            <div
+              className="
+                absolute
+                inset-0
+
+                flex
+                items-center
+                justify-center
+              "
+            >
+              <div
+                className="
+                  h-[58px]
+                  w-[58px]
+
+                  rounded-full
+
+                  border
+                  border-[#a71319]/55
+                "
+              />
+            </div>
+          </div>
+        )}
+
         {/* FRONT COVER */}
         <button
           type="button"
@@ -609,7 +776,7 @@ export default function MenuBook() {
             cursor-pointer
             [transform-style:preserve-3d]
             will-change-transform
-            transition-transform
+            transition-[transform,opacity]
             duration-[1250ms]
             ease-[cubic-bezier(0.22,0.75,0.18,1)]
             focus:outline-none
@@ -618,16 +785,25 @@ export default function MenuBook() {
             transformOrigin: "left center",
             transformStyle: "preserve-3d",
             WebkitTransformStyle: "preserve-3d",
-            transform: coverFlipped
-              ? hologramMode
-                ? "rotateY(-180deg)"
-                : "rotateY(-178deg)"
-              : "rotateY(0deg)",
-            WebkitTransform: coverFlipped
-              ? hologramMode
-                ? "rotateY(-180deg)"
-                : "rotateY(-178deg)"
-              : "rotateY(0deg)",
+            transform: safariPageTurn
+              ? coverFlipped
+                ? "scaleX(0.015)"
+                : "scaleX(1)"
+              : coverFlipped
+                ? hologramMode
+                  ? "rotateY(-180deg)"
+                  : "rotateY(-178deg)"
+                : "rotateY(0deg)",
+            WebkitTransform: safariPageTurn
+              ? coverFlipped
+                ? "scaleX(0.015)"
+                : "scaleX(1)"
+              : coverFlipped
+                ? hologramMode
+                  ? "rotateY(-180deg)"
+                  : "rotateY(-178deg)"
+                : "rotateY(0deg)",
+            opacity: safariPageTurn && coverFlipped ? 0 : 1,
             WebkitBackfaceVisibility: "visible",
             pointerEvents: isOpen ? "none" : "auto",
           }}
@@ -849,6 +1025,95 @@ export default function MenuBook() {
           ใช้ keyframe ตั้งแต่ต้นจนจบแทน transition state
           เพื่อป้องกัน Safari ข้ามเฟรมของ rotateY
         */
+        /*
+          Safari fallback:
+          ไม่ใช้ rotateY/backface เลย เพื่อเลี่ยง WebKit flattening.
+          เป็น 2D "page sweep" ที่ยังให้ความรู้สึกพลิกจากสันซ้าย.
+        */
+        @keyframes safari-flat-next {
+          0% {
+            transform: scaleX(1) skewY(0deg);
+            opacity: 1;
+            filter: brightness(1);
+          }
+          42% {
+            transform: scaleX(0.72) skewY(-1.1deg);
+            opacity: 1;
+            filter: brightness(0.84);
+          }
+          72% {
+            transform: scaleX(0.32) skewY(-0.5deg);
+            opacity: 0.94;
+            filter: brightness(0.74);
+          }
+          100% {
+            transform: scaleX(0.015) skewY(0deg);
+            opacity: 0;
+            filter: brightness(0.68);
+          }
+        }
+
+        @keyframes safari-flat-prev {
+          0% {
+            transform: scaleX(0.015) skewY(0deg);
+            opacity: 0;
+            filter: brightness(0.68);
+          }
+          28% {
+            transform: scaleX(0.32) skewY(-0.5deg);
+            opacity: 0.94;
+            filter: brightness(0.74);
+          }
+          58% {
+            transform: scaleX(0.72) skewY(-1.1deg);
+            opacity: 1;
+            filter: brightness(0.84);
+          }
+          100% {
+            transform: scaleX(1) skewY(0deg);
+            opacity: 1;
+            filter: brightness(1);
+          }
+        }
+
+        @-webkit-keyframes safari-flat-next {
+          0% {
+            -webkit-transform: scaleX(1) skewY(0deg);
+            opacity: 1;
+          }
+          42% {
+            -webkit-transform: scaleX(0.72) skewY(-1.1deg);
+            opacity: 1;
+          }
+          72% {
+            -webkit-transform: scaleX(0.32) skewY(-0.5deg);
+            opacity: 0.94;
+          }
+          100% {
+            -webkit-transform: scaleX(0.015) skewY(0deg);
+            opacity: 0;
+          }
+        }
+
+        @-webkit-keyframes safari-flat-prev {
+          0% {
+            -webkit-transform: scaleX(0.015) skewY(0deg);
+            opacity: 0;
+          }
+          28% {
+            -webkit-transform: scaleX(0.32) skewY(-0.5deg);
+            opacity: 0.94;
+          }
+          58% {
+            -webkit-transform: scaleX(0.72) skewY(-1.1deg);
+            opacity: 1;
+          }
+          100% {
+            -webkit-transform: scaleX(1) skewY(0deg);
+            opacity: 1;
+          }
+        }
+
         @keyframes safari-page-next {
           0% {
             transform: rotateY(0deg) translateZ(0px);
