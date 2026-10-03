@@ -885,13 +885,16 @@ function BestSellerPage() {
           src="/kawdong.jpg"
         />
 
-        <FoodCircle text="รูปที่ 2" />
+        <FoodCircle text="รูปที่ 2"
+        src="/sushisalmon.jpg"
+         />
       </div>
 
       {/* รูปกลาง */}
       <div className="-mt-1 flex justify-center">
         <FoodCircle
           text="รูปที่ 3"
+          src="/donburi/dongsalmons.jpg"
           large
         />
       </div>
@@ -1106,3 +1109,4 @@ function PaperBackground() {
     </>
   );
 }
+
